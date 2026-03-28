@@ -21,8 +21,15 @@ const jwks = createRemoteJWKSet(
 
 app.use(cors());
 app.use(express.json());
+
+/* =========================
+   SERVE FRONTEND (VITE BUILD)
+========================= */
 app.use(express.static(path.join(__dirname, 'public')));
 
+/* =========================
+   AUTH MIDDLEWARE
+========================= */
 function estraiBearerToken(req) {
   const authHeader = req.headers.authorization;
   if (!authHeader) return null;
@@ -67,15 +74,12 @@ async function verificaToken(req, res, next) {
   }
 }
 
+/* =========================
+   API
+========================= */
+
 app.get('/api/health', async (req, res) => {
   res.json({ ok: true });
-});
-
-app.get('/api/versione', (req, res) => {
-  res.json({
-    ok: true,
-    versione: 'BUILD-27-03-2026-TEST'
-  });
 });
 
 app.get('/api/me', verificaToken, (req, res) => {
@@ -147,10 +151,16 @@ app.get('/api/documenti/:id/download', verificaToken, async (req, res) => {
   res.json({ ok: true, download_url: url });
 });
 
+/* =========================
+   SPA FALLBACK (IMPORTANTISSIMO)
+========================= */
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+/* =========================
+   START SERVER
+========================= */
 app.listen(PORT, () => {
-  console.log(`AVVIO BACKEND NUOVO BUILD 27-03-2026 su porta ${PORT}`);
+  console.log(`Server avviato su http://localhost:${PORT}`);
 });
