@@ -152,7 +152,7 @@ function App({ keycloak }) {
           <div className="header-page header-flex">
             <img src={logo} alt="Logo ASPMI" className="logo" />
             <div>
-              <h1>Archivio Documenti ASPMI - BUILD TEST 27-03-2026</h1>
+              <h1>Archivio Documenti ASPMI</h1>
               <p className="sottotitolo">
                 Ricerca, consulta e scarica i documenti dell’archivio ufficiale ASPMI.
               </p>

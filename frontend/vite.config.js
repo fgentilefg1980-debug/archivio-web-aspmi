@@ -2,13 +2,17 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
+  base: '/', // fondamentale per assets
+
   plugins: [react()],
+
+  // SOLO per sviluppo locale
   server: {
     proxy: {
       '/api': {
-        target: 'https://archivio-aspmi-env.eba-kjnm4jnx.eu-north-1.elasticbeanstalk.com', // URL del backend in produzione
+        target: 'http://localhost:3000', // backend locale
         changeOrigin: true,
-        secure: true, // Imposta su `true` se usi HTTPS
+        secure: false,
       },
     },
   },
