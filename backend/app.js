@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const pool = require('./db');
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
@@ -18,10 +17,12 @@ const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .map(origin => origin.trim())
   .filter(Boolean);
 
-app.use(cors({
+const corsOptions = {
   origin: function (origin, callback) {
-    // consente anche richieste senza origin (test server-to-server, curl, healthcheck)
-    if (!origin) return callback(null, true);
+    // Consente richieste senza Origin (curl, health check, test server-to-server)
+    if (!origin) {
+      return callback(null, true);
+    }
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
@@ -31,9 +32,9 @@ app.use(cors({
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-}));
+};
 
-app.options('*', cors());
+app.use(cors(corsOptions));
 
 // =======================
 // S3 CONFIG
@@ -47,6 +48,13 @@ const s3 = new S3Client({
 });
 
 const BUCKET = 'apmi-archivio-644209052775-eu-north-1-an';
+
+// =======================
+// HEALTH CHECK ROOT
+// =======================
+app.get('/', (req, res) => {
+  res.status(200).json({ ok: true, service: 'api' });
+});
 
 // =======================
 // TEST DB
@@ -66,7 +74,12 @@ app.get('/api/test-db', async (req, res) => {
 // =======================
 app.get('/api/cartelle', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM cartelle_archivio');
+    const [rows] = await pool.query(`
+      SELECT *
+      FROM cartelle_archivio
+      ORDER BY nome_cartella
+    `);
+
     res.json({ dati: rows });
   } catch (err) {
     console.error('Errore cartelle:', err);
@@ -79,7 +92,12 @@ app.get('/api/cartelle', async (req, res) => {
 // =======================
 app.get('/api/stati', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM stati_documento');
+    const [rows] = await pool.query(`
+      SELECT *
+      FROM stati_documento
+      ORDER BY nome_stato
+    `);
+
     res.json({ dati: rows });
   } catch (err) {
     console.error('Errore stati:', err);
@@ -95,7 +113,10 @@ app.get('/api/documenti/ricerca', async (req, res) => {
     const { testo, id_cartella, id_stato } = req.query;
 
     let query = `
-      SELECT d.*, c.nome_cartella, s.nome_stato
+      SELECT
+        d.*,
+        c.nome_cartella,
+        s.nome_stato
       FROM documenti d
       LEFT JOIN cartelle_archivio c ON d.id_cartella = c.id_cartella
       LEFT JOIN stati_documento s ON d.id_stato = s.id_stato
@@ -105,7 +126,13 @@ app.get('/api/documenti/ricerca', async (req, res) => {
     const params = [];
 
     if (testo) {
-      query += ` AND (d.oggetto LIKE ? OR d.descrizione_breve LIKE ? OR d.protocollo LIKE ?)`;
+      query += `
+        AND (
+          d.oggetto LIKE ?
+          OR d.descrizione_breve LIKE ?
+          OR d.protocollo LIKE ?
+        )
+      `;
       params.push(`%${testo}%`, `%${testo}%`, `%${testo}%`);
     }
 
@@ -118,6 +145,8 @@ app.get('/api/documenti/ricerca', async (req, res) => {
       query += ` AND d.id_stato = ?`;
       params.push(id_stato);
     }
+
+    query += ` ORDER BY d.data_pubblicazione DESC, d.id_documento DESC`;
 
     const [rows] = await pool.query(query, params);
     res.json({ dati: rows });
@@ -133,13 +162,22 @@ app.get('/api/documenti/ricerca', async (req, res) => {
 app.get('/api/documenti/:id', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT d.*, c.nome_cartella, s.nome_stato
-       FROM documenti d
-       LEFT JOIN cartelle_archivio c ON d.id_cartella = c.id_cartella
-       LEFT JOIN stati_documento s ON d.id_stato = s.id_stato
-       WHERE d.id_documento = ?`,
+      `
+      SELECT
+        d.*,
+        c.nome_cartella,
+        s.nome_stato
+      FROM documenti d
+      LEFT JOIN cartelle_archivio c ON d.id_cartella = c.id_cartella
+      LEFT JOIN stati_documento s ON d.id_stato = s.id_stato
+      WHERE d.id_documento = ?
+      `,
       [req.params.id]
     );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Documento non trovato' });
+    }
 
     res.json({ dato: rows[0] });
   } catch (err) {
@@ -154,11 +192,19 @@ app.get('/api/documenti/:id', async (req, res) => {
 app.get('/api/documenti/:id/download', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT nome_file FROM documenti WHERE id_documento = ?',
+      `
+      SELECT nome_file, nome_file_originale
+      FROM documenti
+      WHERE id_documento = ?
+      `,
       [req.params.id]
     );
 
-    const fileKey = rows[0]?.nome_file;
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Documento non trovato' });
+    }
+
+    const fileKey = rows[0].nome_file;
 
     if (!fileKey) {
       return res.status(404).json({ error: 'File non trovato' });
@@ -170,6 +216,7 @@ app.get('/api/documenti/:id/download', async (req, res) => {
     });
 
     const url = await getSignedUrl(s3, command, { expiresIn: 300 });
+
     res.json({ download_url: url });
   } catch (err) {
     console.error('Errore download:', err);
@@ -177,17 +224,9 @@ app.get('/api/documenti/:id/download', async (req, res) => {
   }
 });
 
-// =======================
-// FRONTEND STATICO
-// =======================
-app.use(express.static(path.join(__dirname, 'public')));
-
-// SPA fallback: solo per route NON /api
-app.get(/^\/(?!api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
 const PORT = process.env.PORT || 3001;
+
 app.listen(PORT, () => {
   console.log(`API attive su porta ${PORT}`);
+  console.log('Origin consentite CORS:', allowedOrigins);
 });
