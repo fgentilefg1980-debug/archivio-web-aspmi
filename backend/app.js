@@ -1,137 +1,100 @@
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
 const path = require('path');
-const { createRemoteJWKSet, jwtVerify } = require('jose');
 const pool = require('./db');
-const { generaPresignedDownloadUrl } = require('./s3');
-
-dotenv.config();
+const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+require('dotenv').config();
 
 const app = express();
 
-const PORT = process.env.PORT || 3001;
-const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER;
-const KEYCLOAK_AUDIENCE = process.env.KEYCLOAK_AUDIENCE;
-
-// Creazione del JWKS (JSON Web Key Set) per la validazione del token
-const jwks = createRemoteJWKSet(
-  new URL(`${KEYCLOAK_ISSUER}/protocol/openid-connect/certs`)
-);
-
-app.use(cors());
 app.use(express.json());
 
-// Servire i file del frontend (vite build)
-app.use(express.static(path.join(__dirname, 'public')));
+// =======================
+// CORS
+// =======================
+const allowedOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
 
-// Funzione per estrarre il token Bearer dalla richiesta
-function estraiBearerToken(req) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return null;
+app.use(cors({
+  origin: function (origin, callback) {
+    // consente anche richieste senza origin (test server-to-server, curl, healthcheck)
+    if (!origin) return callback(null, true);
 
-  const [scheme, token] = authHeader.split(' ');
-  if (scheme !== 'Bearer') return null;
-
-  return token;
-}
-
-// Middleware di verifica del token JWT
-async function verificaToken(req, res, next) {
-  try {
-    const token = estraiBearerToken(req);
-
-    if (!token) {
-      return res.status(401).json({
-        ok: false,
-        message: 'Token Bearer mancante'
-      });
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
     }
 
-    const { payload } = await jwtVerify(token, jwks, {
-      issuer: KEYCLOAK_ISSUER
-    });
+    return callback(new Error(`CORS non consentito per origin: ${origin}`));
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-    // Verifica che il client ID sia valido
-    if (payload.azp !== KEYCLOAK_AUDIENCE) {
-      return res.status(401).json({
-        ok: false,
-        message: 'Token non valido per questo client'
-      });
-    }
+app.options('*', cors());
 
-    req.auth = payload;
-    next();
-  } catch (error) {
-    console.error('Errore verifica token:', error.message);
-
-    // Risposta in caso di errore (token non valido o scaduto)
-    return res.status(401).json({
-      ok: false,
-      message: 'Token non valido o scaduto'
-    });
-  }
-}
-
-/* =========================
-   API ENDPOINTS
-========================= */
-
-// Endpoint di salute del server (health check)
-app.get('/api/health', async (req, res) => {
-  try {
-    res.json({ ok: true });
-  } catch (error) {
-    res.status(500).json({ ok: false, message: 'Errore interno' });
+// =======================
+// S3 CONFIG
+// =======================
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
   }
 });
 
-// Endpoint per ottenere i dettagli dell'utente autenticato
-app.get('/api/me', verificaToken, (req, res) => {
-  res.json({
-    ok: true,
-    user: req.auth
-  });
-});
+const BUCKET = 'apmi-archivio-644209052775-eu-north-1-an';
 
-// Endpoint per ottenere le cartelle archivio
-app.get('/api/cartelle', verificaToken, async (req, res) => {
+// =======================
+// TEST DB
+// =======================
+app.get('/api/test-db', async (req, res) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT id_cartella, nome_cartella
-      FROM cartelle_archivio
-      ORDER BY nome_cartella ASC
-    `);
-
-    res.json({ ok: true, dati: rows });
-  } catch (error) {
-    console.error('Errore lettura cartelle:', error.message);
-    res.status(500).json({ ok: false, message: 'Errore nel recupero cartelle' });
+    const [rows] = await pool.query('SELECT 1+1 AS test');
+    res.json({ success: true, result: rows[0] });
+  } catch (err) {
+    console.error('Errore connessione DB:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Endpoint per ottenere gli stati dei documenti
-app.get('/api/stati', verificaToken, async (req, res) => {
+// =======================
+// CARTELLE
+// =======================
+app.get('/api/cartelle', async (req, res) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT id_stato, nome_stato
-      FROM stati_documento
-      ORDER BY nome_stato ASC
-    `);
-
-    res.json({ ok: true, dati: rows });
-  } catch (error) {
-    console.error('Errore lettura stati:', error.message);
-    res.status(500).json({ ok: false, message: 'Errore nel recupero stati' });
+    const [rows] = await pool.query('SELECT * FROM cartelle_archivio');
+    res.json({ dati: rows });
+  } catch (err) {
+    console.error('Errore cartelle:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Endpoint per la ricerca dei documenti
-app.get('/api/documenti/ricerca', verificaToken, async (req, res) => {
+// =======================
+// STATI
+// =======================
+app.get('/api/stati', async (req, res) => {
   try {
-    const testo = (req.query.testo || '').trim();
+    const [rows] = await pool.query('SELECT * FROM stati_documento');
+    res.json({ dati: rows });
+  } catch (err) {
+    console.error('Errore stati:', err);
+    res.status(500).json({ error: 'Errore stati' });
+  }
+});
 
-    let sql = `
+// =======================
+// RICERCA DOCUMENTI
+// =======================
+app.get('/api/documenti/ricerca', async (req, res) => {
+  try {
+    const { testo, id_cartella, id_stato } = req.query;
+
+    let query = `
       SELECT d.*, c.nome_cartella, s.nome_stato
       FROM documenti d
       LEFT JOIN cartelle_archivio c ON d.id_cartella = c.id_cartella
@@ -140,59 +103,91 @@ app.get('/api/documenti/ricerca', verificaToken, async (req, res) => {
     `;
 
     const params = [];
-    if (testo !== '') {
-      sql += ` AND d.oggetto LIKE ?`;
-      params.push(`%${testo}%`);
+
+    if (testo) {
+      query += ` AND (d.oggetto LIKE ? OR d.descrizione_breve LIKE ? OR d.protocollo LIKE ?)`;
+      params.push(`%${testo}%`, `%${testo}%`, `%${testo}%`);
     }
 
-    sql += ` ORDER BY d.data_pubblicazione DESC LIMIT 200`;
+    if (id_cartella) {
+      query += ` AND d.id_cartella = ?`;
+      params.push(id_cartella);
+    }
 
-    const [rows] = await pool.query(sql, params);
+    if (id_stato) {
+      query += ` AND d.id_stato = ?`;
+      params.push(id_stato);
+    }
 
-    res.json({ ok: true, dati: rows });
-  } catch (error) {
-    console.error('Errore ricerca documenti:', error.message);
-    res.status(500).json({ ok: false, message: 'Errore durante la ricerca dei documenti' });
+    const [rows] = await pool.query(query, params);
+    res.json({ dati: rows });
+  } catch (err) {
+    console.error('Errore ricerca:', err);
+    res.status(500).json({ error: 'Errore ricerca' });
   }
 });
 
-// Endpoint per il download dei documenti
-app.get('/api/documenti/:id/download', verificaToken, async (req, res) => {
+// =======================
+// DETTAGLIO DOCUMENTO
+// =======================
+app.get('/api/documenti/:id', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT * FROM documenti WHERE id_documento = ?`,
+      `SELECT d.*, c.nome_cartella, s.nome_stato
+       FROM documenti d
+       LEFT JOIN cartelle_archivio c ON d.id_cartella = c.id_cartella
+       LEFT JOIN stati_documento s ON d.id_stato = s.id_stato
+       WHERE d.id_documento = ?`,
       [req.params.id]
     );
 
-    const doc = rows[0];
-
-    if (!doc) {
-      return res.status(404).json({ ok: false, message: 'Documento non trovato' });
-    }
-
-    const url = await generaPresignedDownloadUrl(
-      doc.bucket_s3,
-      doc.chiave_s3,
-      doc.nome_file_originale
-    );
-
-    res.json({ ok: true, download_url: url });
-  } catch (error) {
-    console.error('Errore download documento:', error.message);
-    res.status(500).json({ ok: false, message: 'Errore nella generazione del link di download' });
+    res.json({ dato: rows[0] });
+  } catch (err) {
+    console.error('Errore dettaglio:', err);
+    res.status(500).json({ error: 'Errore dettaglio' });
   }
 });
 
-/* =========================
-   FALLBACK PER SPA
-========================= */
-app.get('*', (req, res) => {
+// =======================
+// DOWNLOAD DOCUMENTO
+// =======================
+app.get('/api/documenti/:id/download', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT nome_file FROM documenti WHERE id_documento = ?',
+      [req.params.id]
+    );
+
+    const fileKey = rows[0]?.nome_file;
+
+    if (!fileKey) {
+      return res.status(404).json({ error: 'File non trovato' });
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: fileKey
+    });
+
+    const url = await getSignedUrl(s3, command, { expiresIn: 300 });
+    res.json({ download_url: url });
+  } catch (err) {
+    console.error('Errore download:', err);
+    res.status(500).json({ error: 'Errore download' });
+  }
+});
+
+// =======================
+// FRONTEND STATICO
+// =======================
+app.use(express.static(path.join(__dirname, 'public')));
+
+// SPA fallback: solo per route NON /api
+app.get(/^\/(?!api).*/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-/* =========================
-   AVVIO DEL SERVER
-========================= */
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`Server avviato su http://localhost:${PORT}`);
+  console.log(`API attive su porta ${PORT}`);
 });
