@@ -4,6 +4,7 @@ import './index.css';
 import logo from './assets/logo.png';
 import NuovoDocumento from './pages/NuovoDocumento';
 import GestioneStrutture from './pages/GestioneStrutture';
+import NotificheEmail from './pages/NotificheEmail';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL;
 const PAGE_SIZE = 10;
@@ -799,6 +800,18 @@ function App({ keycloak }) {
             >
               Gestione strutture
             </button>
+
+            <button
+              className={vistaAttiva === 'notifiche-email' ? 'nav-tab-btn nav-tab-green active' : 'nav-tab-btn nav-tab-green'}
+              onClick={() => {
+                setVistaAttiva('notifiche-email');
+                setDocumentoInModifica(null);
+                setErrore('');
+                setMessaggio('');
+              }}
+            >
+              Notifiche email
+            </button>
           </>
         )}
       </div>
@@ -1257,6 +1270,15 @@ function App({ keycloak }) {
           keycloak={keycloak}
           onOperazioneCompletata={async (msg) => {
             await caricaFiltri();
+            setMessaggio(msg || 'Operazione completata con successo.');
+          }}
+        />
+      )}
+
+      {isAdmin && vistaAttiva === 'notifiche-email' && (
+        <NotificheEmail
+          keycloak={keycloak}
+          onOperazioneCompletata={(msg) => {
             setMessaggio(msg || 'Operazione completata con successo.');
           }}
         />

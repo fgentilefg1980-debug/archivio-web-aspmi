@@ -13,7 +13,8 @@ const emptyForm = {
   data_pubblicazione: '',
   oggetto: '',
   descrizione_breve: '',
-  note: ''
+  note: '',
+  invia_notifica_email: false
 };
 
 export default function NuovoDocumento({
@@ -163,7 +164,8 @@ export default function NuovoDocumento({
           : '',
         oggetto: documentoDaModificare.oggetto || '',
         descrizione_breve: documentoDaModificare.descrizione_breve || '',
-        note: documentoDaModificare.note || ''
+        note: documentoDaModificare.note || '',
+        invia_notifica_email: false
       };
 
       setFormData(dati);
@@ -220,10 +222,18 @@ export default function NuovoDocumento({
   }, [file, documentoDaModificare]);
 
   const handleChange = (e) => {
-    const { name, value, files } = e.target;
+    const { name, value, files, type, checked } = e.target;
 
     if (name === 'file') {
       setFile(files?.[0] || null);
+      return;
+    }
+
+    if (type === 'checkbox') {
+      setFormData((prev) => ({
+        ...prev,
+        [name]: checked
+      }));
       return;
     }
 
@@ -233,10 +243,16 @@ export default function NuovoDocumento({
     }));
   };
 
+  const validaForm = () => {
+    if (!formData.id_cartella) return 'Seleziona la cartella archivio.';
+    if (!formData.id_stato) return 'Seleziona lo stato documento.';
+    if (!formData.data_pubblicazione) return 'Seleziona la data pubblicazione.';
+    if (!formData.oggetto || !formData.oggetto.trim()) return 'Inserisci l’oggetto del documento.';
+    return '';
+  };
+
   const uploadFileSePresente = async () => {
-    if (!file) {
-      return null;
-    }
+    if (!file) return null;
 
     const presignedResponse = await axios.post(
       `${API_BASE_URL}/documenti/presigned-upload`,
@@ -285,6 +301,13 @@ export default function NuovoDocumento({
     setMessaggio('');
 
     try {
+      const erroreValidazione = validaForm();
+      if (erroreValidazione) {
+        setErrore(erroreValidazione);
+        setSaving(false);
+        return;
+      }
+
       const payload = {
         id_ente: formData.id_ente || null,
         id_sottoente: formData.id_sottoente || null,
@@ -293,9 +316,10 @@ export default function NuovoDocumento({
         id_stato: formData.id_stato,
         protocollo: formData.protocollo || null,
         data_pubblicazione: formData.data_pubblicazione,
-        oggetto: formData.oggetto,
+        oggetto: formData.oggetto.trim(),
         descrizione_breve: formData.descrizione_breve || null,
-        note: formData.note || null
+        note: formData.note || null,
+        invia_notifica_email: formData.invia_notifica_email ? 1 : 0
       };
 
       const uploadInfo = await uploadFileSePresente();
@@ -308,31 +332,54 @@ export default function NuovoDocumento({
         }
       }
 
+      let response;
+
       if (isEditMode) {
-        await axios.put(
+        response = await axios.put(
           `${API_BASE_URL}/documenti/${documentoDaModificare.id_documento}`,
           payload,
           await getAuthConfig()
         );
-        setMessaggio('Documento aggiornato con successo.');
-        onSalvato?.('Documento aggiornato con successo.');
+
+        const msgBase = 'Documento aggiornato con successo.';
+        const msgNotifica =
+          response?.data?.notifica_email?.ok === true
+            ? ' Notifica email inviata.'
+            : response?.data?.notifica_email?.ok === false
+              ? ' Documento aggiornato, ma invio notifica email non riuscito.'
+              : '';
+
+        setMessaggio(msgBase + msgNotifica);
+        onSalvato?.(msgBase + msgNotifica);
       } else {
-        await axios.post(
+        response = await axios.post(
           `${API_BASE_URL}/documenti`,
           payload,
           await getAuthConfig()
         );
+
+        const msgBase = 'Documento inserito con successo.';
+        const msgNotifica =
+          response?.data?.notifica_email?.ok === true
+            ? ' Notifica email inviata.'
+            : response?.data?.notifica_email?.ok === false
+              ? ' Documento salvato, ma invio notifica email non riuscito.'
+              : '';
+
         setFormData(emptyForm);
         setFile(null);
-        setMessaggio('Documento inserito con successo.');
-        onSalvato?.('Documento inserito con successo.');
+        setMessaggio(msgBase + msgNotifica);
+        onSalvato?.(msgBase + msgNotifica);
       }
     } catch (error) {
-      console.error(error);
+      console.error('ERRORE COMPLETO SALVATAGGIO DOCUMENTO:', error);
+      console.error('RISPOSTA BACKEND:', error.response?.data);
+
       setErrore(
         error.response?.data?.details ||
           error.response?.data?.sqlMessage ||
           error.response?.data?.error ||
+          error.response?.data?.messaggio ||
           error.message ||
           'Errore durante il salvataggio del documento'
       );
@@ -342,159 +389,202 @@ export default function NuovoDocumento({
   };
 
   return (
-    <div className="box-dettaglio">
-      <div className="titolo-sezione">
-        <h2>{isEditMode ? 'Modifica documento' : 'Nuovo documento'}</h2>
+    <div className="admin-panel-shell">
+      <div className="admin-panel-card">
+        <div className="admin-panel-header">
+          <div className="admin-panel-header-left">
+            <div className="admin-panel-icon">{isEditMode ? '✎' : '＋'}</div>
+            <div className="admin-panel-title-wrap">
+              <h2>{isEditMode ? 'Modifica documento' : 'Nuovo documento'}</h2>
+              <div className="admin-panel-subtitle">
+                Inserisci o aggiorna un documento dell’archivio con allegato e notifica email.
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-panel-badge">
+            {isEditMode ? 'Modalità modifica' : 'Inserimento rapido'}
+          </div>
+        </div>
+
+        <div className="admin-panel-body">
+          {messaggio && <div className="messaggio-successo">{messaggio}</div>}
+          {errore && <div className="errore">{errore}</div>}
+
+          <div className="admin-note-box">
+            Compila i campi principali del documento, seleziona la cartella corretta e,
+            se vuoi, attiva la notifica email automatica ai destinatari configurati.
+          </div>
+
+          <form onSubmit={handleSubmit} className="document-form-grid admin-form-grid">
+            <div className="campo">
+              <label>Ente</label>
+              <select name="id_ente" value={formData.id_ente} onChange={handleChange}>
+                <option value="">Seleziona ente</option>
+                {enti.map((ente) => (
+                  <option key={ente.id_ente} value={String(ente.id_ente)}>
+                    {buildEnteLabel(ente)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="campo">
+              <label>Sottoente</label>
+              <select
+                name="id_sottoente"
+                value={formData.id_sottoente}
+                onChange={handleChange}
+                disabled={!formData.id_ente}
+              >
+                <option value="">Seleziona sottoente</option>
+                {sottoenti.map((item) => (
+                  <option key={item.id_sottoente} value={String(item.id_sottoente)}>
+                    {buildSottoenteLabel(item)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="campo">
+              <label>Ufficio</label>
+              <select
+                name="id_ufficio"
+                value={formData.id_ufficio}
+                onChange={handleChange}
+                disabled={!formData.id_sottoente}
+              >
+                <option value="">Seleziona ufficio</option>
+                {uffici.map((item) => (
+                  <option key={item.id_ufficio} value={String(item.id_ufficio)}>
+                    {buildUfficioLabel(item)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="campo campo-span-2">
+              <label>Cartella archivio *</label>
+              <select name="id_cartella" value={formData.id_cartella} onChange={handleChange}>
+                <option value="">Seleziona cartella</option>
+                {cartelle.map((cartella) => (
+                  <option key={cartella.id_cartella} value={String(cartella.id_cartella)}>
+                    {buildCartellaLabel(cartella)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="campo">
+              <label>Stato documento *</label>
+              <select name="id_stato" value={formData.id_stato} onChange={handleChange}>
+                <option value="">Seleziona stato</option>
+                {stati.map((stato) => (
+                  <option key={stato.id_stato} value={String(stato.id_stato)}>
+                    {stato.nome_stato}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="campo">
+              <label>Protocollo</label>
+              <input
+                type="text"
+                name="protocollo"
+                value={formData.protocollo}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="campo">
+              <label>Data pubblicazione *</label>
+              <input
+                type="date"
+                name="data_pubblicazione"
+                value={formData.data_pubblicazione}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="campo campo-span-3">
+              <label>Oggetto *</label>
+              <input
+                type="text"
+                name="oggetto"
+                value={formData.oggetto}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="campo campo-span-3">
+              <label>Descrizione breve</label>
+              <textarea
+                name="descrizione_breve"
+                rows="3"
+                value={formData.descrizione_breve}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="campo campo-span-3">
+              <label>Note</label>
+              <textarea
+                name="note"
+                rows="4"
+                value={formData.note}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="campo campo-span-3">
+              <div className="file-upload-panel">
+                <label>Allegato</label>
+                <input type="file" name="file" onChange={handleChange} />
+                <div className="file-info-box">{fileInfoLabel}</div>
+              </div>
+            </div>
+
+            <div className="campo campo-span-3">
+              <div className="notify-choice-box">
+                <input
+                  id="invia_notifica_email"
+                  type="checkbox"
+                  name="invia_notifica_email"
+                  checked={formData.invia_notifica_email}
+                  onChange={handleChange}
+                />
+                <div>
+                  <label htmlFor="invia_notifica_email" className="notify-choice-title">
+                    Invia notifica email
+                  </label>
+                  <div className="notify-choice-text">
+                    Se attivata, al salvataggio del documento verrà inviata una email ai destinatari configurati.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="azioni campo-span-3 admin-actions-bar">
+              <button type="submit" className="btn btn-primary btn-gradient-violet" disabled={saving}>
+                {saving
+                  ? 'Salvataggio in corso...'
+                  : isEditMode
+                    ? 'Aggiorna documento'
+                    : 'Salva documento'}
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-soft-slate"
+                onClick={onAnnulla}
+              >
+                Annulla
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
-
-      {messaggio && <div className="messaggio-successo">{messaggio}</div>}
-      {errore && <div className="errore">{errore}</div>}
-
-      <form onSubmit={handleSubmit} className="document-form-grid">
-        <div className="campo">
-          <label>Ente</label>
-          <select name="id_ente" value={formData.id_ente} onChange={handleChange}>
-            <option value="">Seleziona ente</option>
-            {enti.map((ente) => (
-              <option key={ente.id_ente} value={String(ente.id_ente)}>
-                {buildEnteLabel(ente)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="campo">
-          <label>Sottoente</label>
-          <select
-            name="id_sottoente"
-            value={formData.id_sottoente}
-            onChange={handleChange}
-            disabled={!formData.id_ente}
-          >
-            <option value="">Seleziona sottoente</option>
-            {sottoenti.map((item) => (
-              <option key={item.id_sottoente} value={String(item.id_sottoente)}>
-                {buildSottoenteLabel(item)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="campo">
-          <label>Ufficio</label>
-          <select
-            name="id_ufficio"
-            value={formData.id_ufficio}
-            onChange={handleChange}
-            disabled={!formData.id_sottoente}
-          >
-            <option value="">Seleziona ufficio</option>
-            {uffici.map((item) => (
-              <option key={item.id_ufficio} value={String(item.id_ufficio)}>
-                {buildUfficioLabel(item)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="campo campo-span-2">
-          <label>Cartella archivio</label>
-          <select name="id_cartella" value={formData.id_cartella} onChange={handleChange}>
-            <option value="">Seleziona cartella</option>
-            {cartelle.map((cartella) => (
-              <option key={cartella.id_cartella} value={String(cartella.id_cartella)}>
-                {buildCartellaLabel(cartella)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="campo">
-          <label>Stato documento</label>
-          <select name="id_stato" value={formData.id_stato} onChange={handleChange}>
-            <option value="">Seleziona stato</option>
-            {stati.map((stato) => (
-              <option key={stato.id_stato} value={String(stato.id_stato)}>
-                {stato.nome_stato}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="campo">
-          <label>Protocollo</label>
-          <input
-            type="text"
-            name="protocollo"
-            value={formData.protocollo}
-            onChange={handleChange}
-          />
-        </div>
-
-        <div className="campo">
-          <label>Data pubblicazione</label>
-          <input
-            type="date"
-            name="data_pubblicazione"
-            value={formData.data_pubblicazione}
-            onChange={handleChange}
-          />
-        </div>
-
-        <div className="campo campo-span-3">
-          <label>Oggetto</label>
-          <input
-            type="text"
-            name="oggetto"
-            value={formData.oggetto}
-            onChange={handleChange}
-          />
-        </div>
-
-        <div className="campo campo-span-3">
-          <label>Descrizione breve</label>
-          <textarea
-            name="descrizione_breve"
-            rows="3"
-            value={formData.descrizione_breve}
-            onChange={handleChange}
-          />
-        </div>
-
-        <div className="campo campo-span-3">
-          <label>Note</label>
-          <textarea
-            name="note"
-            rows="4"
-            value={formData.note}
-            onChange={handleChange}
-          />
-        </div>
-
-        <div className="campo campo-span-3">
-          <label>Allegato</label>
-          <input type="file" name="file" onChange={handleChange} />
-          <div className="file-info-box">{fileInfoLabel}</div>
-        </div>
-
-        <div className="azioni campo-span-3">
-          <button type="submit" className="btn btn-primary btn-gradient-violet" disabled={saving}>
-            {saving
-              ? 'Salvataggio in corso...'
-              : isEditMode
-                ? 'Aggiorna documento'
-                : 'Salva documento'}
-          </button>
-
-          <button
-            type="button"
-            className="btn btn-secondary btn-soft-slate"
-            onClick={onAnnulla}
-          >
-            Annulla
-          </button>
-        </div>
-      </form>
     </div>
   );
 }

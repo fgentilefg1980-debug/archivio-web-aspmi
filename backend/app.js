@@ -14,6 +14,12 @@ const net = require('net');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const jwksClient = require('jwks-rsa');
+const {
+  verificaConfigurazioneEmail,
+  inviaEmail,
+  getDestinatariNotificheAttivi,
+  inviaNotificaNuovoDocumento,
+} = require('./emailService');
 require('dotenv').config();
 
 const app = express();
@@ -287,6 +293,258 @@ app.get('/api/debug-tcp', authenticateToken, requireAdmin, async (req, res) => {
   });
 
   socket.connect(port, host);
+});
+
+app.get('/api/test-email', async (req, res) => {
+  try {
+    const verifica = await verificaConfigurazioneEmail();
+
+    if (!verifica.ok) {
+      return res.status(500).json({
+        ok: false,
+        messaggio: verifica.messaggio,
+        errore: verifica.errore,
+      });
+    }
+
+    const destinatario = req.query.to || process.env.SMTP_FROM_EMAIL;
+
+    const info = await inviaEmail({
+      to: destinatario,
+      subject: 'Test email Archivio ASPMI',
+      text: 'Questa è una email di prova inviata dal backend Archivio ASPMI.',
+      html: `
+        <div style="font-family: Arial, sans-serif; font-size: 14px;">
+          <h2>Test email Archivio ASPMI</h2>
+          <p>Questa è una email di prova inviata dal backend Archivio ASPMI.</p>
+          <p>Se stai leggendo questo messaggio, la configurazione SMTP funziona.</p>
+        </div>
+      `,
+    });
+
+    res.json({
+      ok: true,
+      messaggio: 'Email inviata correttamente',
+      messageId: info.messageId,
+      destinatario,
+    });
+  } catch (errore) {
+    res.status(500).json({
+      ok: false,
+      messaggio: 'Invio email fallito',
+      errore: errore.message,
+    });
+  }
+});
+
+app.get('/api/test-notifica-documento', async (req, res) => {
+  try {
+    const destinatari = await getDestinatariNotificheAttivi();
+
+    if (!destinatari || destinatari.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        messaggio: 'Nessun destinatario attivo trovato.',
+      });
+    }
+
+    const risultato = await inviaNotificaNuovoDocumento({
+      protocollo: 'TEST-001',
+      dataPubblicazione: '2026-04-05',
+      oggetto: 'Documento di prova per notifica email',
+      nomeFile: 'documento_test.pdf',
+      nomeCartella: 'Cartella di test',
+      nomeStato: 'Valido',
+    });
+
+    res.json(risultato);
+  } catch (errore) {
+    res.status(500).json({
+      ok: false,
+      messaggio: "Errore durante l'invio della notifica documento",
+      errore: errore.message,
+    });
+  }
+});
+
+// =========================
+// NOTIFICHE EMAIL
+// =========================
+
+app.get('/api/notifiche-email', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT id_notifica_email, email, nome_destinatario, attiva, note, data_creazione, data_modifica
+      FROM notifiche_email
+      ORDER BY nome_destinatario, email
+    `);
+
+    res.json({
+      ok: true,
+      dati: rows,
+    });
+  } catch (errore) {
+    res.status(500).json({
+      ok: false,
+      messaggio: 'Errore nel recupero delle notifiche email',
+      errore: errore.message,
+    });
+  }
+});
+
+app.post('/api/notifiche-email', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { email, nome_destinatario, attiva, note } = req.body;
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({
+        ok: false,
+        messaggio: 'Il campo email è obbligatorio.',
+      });
+    }
+
+    const emailPulita = email.trim().toLowerCase();
+    const nomePulito = nome_destinatario ? nome_destinatario.trim() : null;
+    const notePulite = note ? note.trim() : null;
+    const attivaVal = Number(attiva) === 0 ? 0 : 1;
+
+    const [esistenti] = await pool.query(
+      `SELECT id_notifica_email FROM notifiche_email WHERE email = ?`,
+      [emailPulita]
+    );
+
+    if (esistenti.length > 0) {
+      return res.status(409).json({
+        ok: false,
+        messaggio: 'Questo indirizzo email è già presente.',
+      });
+    }
+
+    const [result] = await pool.query(
+      `
+      INSERT INTO notifiche_email (email, nome_destinatario, attiva, note)
+      VALUES (?, ?, ?, ?)
+      `,
+      [emailPulita, nomePulito, attivaVal, notePulite]
+    );
+
+    res.status(201).json({
+      ok: true,
+      messaggio: 'Indirizzo email aggiunto correttamente.',
+      id_notifica_email: result.insertId,
+    });
+  } catch (errore) {
+    res.status(500).json({
+      ok: false,
+      messaggio: "Errore durante l'inserimento dell'indirizzo email",
+      errore: errore.message,
+    });
+  }
+});
+
+app.put('/api/notifiche-email/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { email, nome_destinatario, attiva, note } = req.body;
+
+    if (!id || id <= 0) {
+      return res.status(400).json({
+        ok: false,
+        messaggio: 'ID non valido.',
+      });
+    }
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({
+        ok: false,
+        messaggio: 'Il campo email è obbligatorio.',
+      });
+    }
+
+    const emailPulita = email.trim().toLowerCase();
+    const nomePulito = nome_destinatario ? nome_destinatario.trim() : null;
+    const notePulite = note ? note.trim() : null;
+    const attivaVal = Number(attiva) === 0 ? 0 : 1;
+
+    const [esistenti] = await pool.query(
+      `
+      SELECT id_notifica_email
+      FROM notifiche_email
+      WHERE email = ? AND id_notifica_email <> ?
+      `,
+      [emailPulita, id]
+    );
+
+    if (esistenti.length > 0) {
+      return res.status(409).json({
+        ok: false,
+        messaggio: 'Esiste già un altro record con questo indirizzo email.',
+      });
+    }
+
+    const [result] = await pool.query(
+      `
+      UPDATE notifiche_email
+      SET email = ?, nome_destinatario = ?, attiva = ?, note = ?
+      WHERE id_notifica_email = ?
+      `,
+      [emailPulita, nomePulito, attivaVal, notePulite, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        ok: false,
+        messaggio: 'Record non trovato.',
+      });
+    }
+
+    res.json({
+      ok: true,
+      messaggio: 'Indirizzo email aggiornato correttamente.',
+    });
+  } catch (errore) {
+    res.status(500).json({
+      ok: false,
+      messaggio: "Errore durante l'aggiornamento dell'indirizzo email",
+      errore: errore.message,
+    });
+  }
+});
+
+app.delete('/api/notifiche-email/:id', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!id || id <= 0) {
+      return res.status(400).json({
+        ok: false,
+        messaggio: 'ID non valido.',
+      });
+    }
+
+    const [result] = await pool.query(
+      `DELETE FROM notifiche_email WHERE id_notifica_email = ?`,
+      [id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        ok: false,
+        messaggio: 'Record non trovato.',
+      });
+    }
+
+    res.json({
+      ok: true,
+      messaggio: 'Indirizzo email eliminato correttamente.',
+    });
+  } catch (errore) {
+    res.status(500).json({
+      ok: false,
+      messaggio: "Errore durante l'eliminazione dell'indirizzo email",
+      errore: errore.message,
+    });
+  }
 });
 
 // =========================
@@ -1288,10 +1546,14 @@ app.post('/api/documenti', authenticateToken, requireAdmin, async (req, res) => 
       estensione_file,
       bucket_s3,
       chiave_s3,
-      nome_file_originale
+      nome_file_originale,
+      invia_notifica_email
     } = req.body;
 
-    if (!id_cartella || !id_stato || !data_pubblicazione || !oggetto) {
+    console.log('DEBUG DOCUMENTI - BODY RICEVUTO:', req.body);
+    console.log('DEBUG DOCUMENTI - invia_notifica_email:', invia_notifica_email);
+
+    if (!id_cartella || !id_stato || !data_pubblicazione || !oggetto || !String(oggetto).trim()) {
       return res.status(400).json({
         error: 'Compila i campi obbligatori: cartella, stato, data pubblicazione, oggetto'
       });
@@ -1327,7 +1589,7 @@ app.post('/api/documenti', authenticateToken, requireAdmin, async (req, res) => 
       id_stato,
       protocollo || null,
       data_pubblicazione,
-      oggetto,
+      String(oggetto).trim(),
       descrizione_breve || null,
       note || null,
       nome_file || null,
@@ -1340,9 +1602,78 @@ app.post('/api/documenti', authenticateToken, requireAdmin, async (req, res) => 
 
     const [result] = await pool.query(query, params);
 
+    console.log('DEBUG DOCUMENTI - documento inserito con ID:', result.insertId);
+
+    let notifica_email = null;
+
+    if (Number(invia_notifica_email) === 1) {
+      console.log('DEBUG DOCUMENTI - invio notifica ATTIVATO');
+
+      const [cartellaRows] = await pool.query(
+        `
+        SELECT nome_cartella, percorso_completo
+        FROM cartelle_archivio
+        WHERE id_cartella = ?
+        `,
+        [id_cartella]
+      );
+
+      const [statoRows] = await pool.query(
+        `
+        SELECT nome_stato
+        FROM stati_documento
+        WHERE id_stato = ?
+        `,
+        [id_stato]
+      );
+
+      const nomeCartella =
+        cartellaRows.length > 0
+          ? (cartellaRows[0].percorso_completo || cartellaRows[0].nome_cartella || '')
+          : '';
+
+      const nomeStato =
+        statoRows.length > 0
+          ? (statoRows[0].nome_stato || '')
+          : '';
+
+      console.log('DEBUG DOCUMENTI - dati notifica:', {
+        protocollo,
+        dataPubblicazione: data_pubblicazione,
+        oggetto: String(oggetto).trim(),
+        nomeFile: nome_file_originale || nome_file || '',
+        nomeCartella,
+        nomeStato
+      });
+
+      try {
+        notifica_email = await inviaNotificaNuovoDocumento({
+          protocollo,
+          dataPubblicazione: data_pubblicazione,
+          oggetto: String(oggetto).trim(),
+          nomeFile: nome_file_originale || nome_file || '',
+          nomeCartella,
+          nomeStato
+        });
+
+        console.log('DEBUG DOCUMENTI - esito notifica:', notifica_email);
+      } catch (emailError) {
+        console.error('ERRORE INVIO NOTIFICA EMAIL:', emailError);
+
+        notifica_email = {
+          ok: false,
+          messaggio: 'Documento salvato ma invio notifica email non riuscito.',
+          errore: emailError.message
+        };
+      }
+    } else {
+      console.log('DEBUG DOCUMENTI - invio notifica NON attivato');
+    }
+
     res.status(201).json({
       messaggio: 'Documento inserito con successo',
-      id_documento: result.insertId
+      id_documento: result.insertId,
+      notifica_email
     });
   } catch (err) {
     console.error('Errore inserimento documento:', err);
