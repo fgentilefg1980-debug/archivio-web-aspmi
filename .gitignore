@@ -10,3 +10,39 @@ backend/node_modules/
 backend/dist/
 backend/public/assets/
 frontend/public/assets/
+# env
+backend/.env
+
+# elastic beanstalk locali
+backend/.elasticbeanstalk/
+
+# zip e pacchetti temporanei
+*.zip
+
+# cartelle temporanee
+temp/
+temp2/
+
+# file copia/debug
+backend/app - Copia.js
+backend/app_1.js
+backend/db - Copia.js
+backend/risposta.json
+backend/test-db.js
+backend/git
+main
+
+# file strani creati per errore
+\$\{sottoente.nome_sottoente\}\`
+')
+(
+({
+{
+
+# favicon duplicata
+backend/public/favicon.png.png
+
+# node modules se presenti
+node_modules/
+backend/node_modules/
+frontend/node_modules/
