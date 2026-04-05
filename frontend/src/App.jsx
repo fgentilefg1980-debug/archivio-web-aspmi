@@ -8,6 +8,8 @@ import GestioneStrutture from './pages/GestioneStrutture';
 const API_BASE_URL = import.meta.env.VITE_API_URL;
 const PAGE_SIZE = 10;
 const COLUMN_STORAGE_KEY = 'aspmi_archivio_column_widths';
+const RECENT_DOCS_STORAGE_KEY = 'aspmi_archivio_recent_docs';
+const COLUMN_VISIBILITY_STORAGE_KEY = 'aspmi_archivio_column_visibility';
 
 const DEFAULT_COLUMN_WIDTHS = {
   data_pubblicazione: 120,
@@ -17,6 +19,24 @@ const DEFAULT_COLUMN_WIDTHS = {
   nome_stato: 130,
   azioni: 170
 };
+
+const DEFAULT_COLUMN_VISIBILITY = {
+  data_pubblicazione: true,
+  protocollo: true,
+  oggetto: true,
+  percorso_completo: true,
+  nome_stato: true,
+  azioni: true
+};
+
+const COLUMN_DEFS = [
+  { key: 'data_pubblicazione', label: 'Data' },
+  { key: 'protocollo', label: 'Protocollo' },
+  { key: 'oggetto', label: 'Oggetto' },
+  { key: 'percorso_completo', label: 'Cartella' },
+  { key: 'nome_stato', label: 'Stato' },
+  { key: 'azioni', label: 'Azioni' }
+];
 
 function App({ keycloak }) {
   const [testo, setTesto] = useState('');
@@ -63,7 +83,36 @@ function App({ keycloak }) {
     }
   });
 
+  const [columnVisibility, setColumnVisibility] = useState(() => {
+    try {
+      const saved = localStorage.getItem(COLUMN_VISIBILITY_STORAGE_KEY);
+      if (!saved) return DEFAULT_COLUMN_VISIBILITY;
+
+      const parsed = JSON.parse(saved);
+      return {
+        ...DEFAULT_COLUMN_VISIBILITY,
+        ...parsed
+      };
+    } catch (error) {
+      console.warn('Impossibile leggere la visibilità colonne:', error);
+      return DEFAULT_COLUMN_VISIBILITY;
+    }
+  });
+
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+
+  const [recentDocs, setRecentDocs] = useState(() => {
+    try {
+      const saved = localStorage.getItem(RECENT_DOCS_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.warn('Impossibile leggere i documenti recenti:', error);
+      return {};
+    }
+  });
+
   const resizeRef = useRef(null);
+  const columnMenuRef = useRef(null);
 
   const adminRoles = ['admin', 'archivio_admin', 'aspmi_admin'];
 
@@ -82,6 +131,13 @@ function App({ keycloak }) {
     return userRoles.some((role) => adminRoles.includes(String(role).toLowerCase()));
   }, [userRoles]);
 
+  const currentUsername =
+    keycloak?.tokenParsed?.preferred_username ||
+    keycloak?.tokenParsed?.email ||
+    'utente';
+
+  const recentDocsForUser = recentDocs[currentUsername] || [];
+
   useEffect(() => {
     document.title = 'ASPMI Archivio';
   }, []);
@@ -93,6 +149,25 @@ function App({ keycloak }) {
       console.warn('Impossibile salvare le larghezze colonne:', error);
     }
   }, [columnWidths]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        COLUMN_VISIBILITY_STORAGE_KEY,
+        JSON.stringify(columnVisibility)
+      );
+    } catch (error) {
+      console.warn('Impossibile salvare la visibilità colonne:', error);
+    }
+  }, [columnVisibility]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RECENT_DOCS_STORAGE_KEY, JSON.stringify(recentDocs));
+    } catch (error) {
+      console.warn('Impossibile salvare i documenti recenti:', error);
+    }
+  }, [recentDocs]);
 
   useEffect(() => {
     if (!isAdmin && vistaAttiva !== 'ricerca') {
@@ -128,12 +203,38 @@ function App({ keycloak }) {
     };
   }, []);
 
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        showColumnMenu &&
+        columnMenuRef.current &&
+        !columnMenuRef.current.contains(event.target)
+      ) {
+        setShowColumnMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showColumnMenu]);
+
   const resetColumnWidths = () => {
     setColumnWidths(DEFAULT_COLUMN_WIDTHS);
     try {
       localStorage.removeItem(COLUMN_STORAGE_KEY);
     } catch (error) {
       console.warn('Impossibile ripristinare le larghezze colonne:', error);
+    }
+  };
+
+  const resetColumnVisibility = () => {
+    setColumnVisibility(DEFAULT_COLUMN_VISIBILITY);
+    try {
+      localStorage.removeItem(COLUMN_VISIBILITY_STORAGE_KEY);
+    } catch (error) {
+      console.warn('Impossibile ripristinare la visibilità colonne:', error);
     }
   };
 
@@ -148,6 +249,60 @@ function App({ keycloak }) {
     };
 
     document.body.classList.add('col-resizing');
+  };
+
+  const toggleColumnVisibility = (columnKey) => {
+    if (columnKey === 'azioni') return;
+
+    setColumnVisibility((prev) => {
+      const visibleColumns = Object.entries(prev).filter(
+        ([key, value]) => key !== 'azioni' && value
+      );
+
+      if (prev[columnKey] && visibleColumns.length === 1) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [columnKey]: !prev[columnKey]
+      };
+    });
+  };
+
+  const salvaDocumentoRecente = (doc) => {
+    if (!doc?.id_documento) return;
+
+    setRecentDocs((prev) => {
+      const listaUtente = prev[currentUsername] || [];
+
+      const nuovaVoce = {
+        id_documento: doc.id_documento,
+        oggetto: doc.oggetto || 'Documento senza oggetto',
+        protocollo: doc.protocollo || '',
+        data_pubblicazione: doc.data_pubblicazione || null,
+        nome_stato: doc.nome_stato || '',
+        percorso_completo: doc.percorso_completo || doc.nome_cartella || '',
+        ts: Date.now()
+      };
+
+      const aggiornata = [
+        nuovaVoce,
+        ...listaUtente.filter((item) => item.id_documento !== doc.id_documento)
+      ].slice(0, 8);
+
+      return {
+        ...prev,
+        [currentUsername]: aggiornata
+      };
+    });
+  };
+
+  const svuotaRecentiUtente = () => {
+    setRecentDocs((prev) => ({
+      ...prev,
+      [currentUsername]: []
+    }));
   };
 
   const getAuthConfig = async (extraConfig = {}) => {
@@ -337,7 +492,13 @@ function App({ keycloak }) {
         `${API_BASE_URL}/documenti/${idDocumento}`,
         await getAuthConfig()
       );
-      setDocumentoDettaglio(response.data.dato || null);
+
+      const doc = response.data.dato || null;
+      setDocumentoDettaglio(doc);
+
+      if (doc) {
+        salvaDocumentoRecente(doc);
+      }
     } catch (error) {
       console.error(error);
       setErrore('Errore nel caricamento del dettaglio documento');
@@ -351,6 +512,15 @@ function App({ keycloak }) {
         `${API_BASE_URL}/documenti/${idDocumento}/download`,
         await getAuthConfig()
       );
+
+      const docDaSalvare =
+        risultati.find((item) => item.id_documento === idDocumento) ||
+        documentoDettaglio ||
+        null;
+
+      if (docDaSalvare) {
+        salvaDocumentoRecente(docDaSalvare);
+      }
 
       const url = response.data.download_url;
       if (url) {
@@ -499,13 +669,18 @@ function App({ keycloak }) {
   const renderResizableHeader = (label, key) => (
     <th style={{ width: `${columnWidths[key]}px` }}>
       <div className="th-resizable">
-        <button className="th-sort-btn" onClick={() => handleSort(key)}>
+        <button type="button" className="th-sort-btn" onClick={() => handleSort(key)}>
           {label} {renderSortIndicator(key)}
         </button>
         <div className="col-resizer" onMouseDown={(e) => startResize(e, key)} />
       </div>
     </th>
   );
+
+  const renderHeaderIfVisible = (label, key) => {
+    if (!columnVisibility[key]) return null;
+    return renderResizableHeader(label, key);
+  };
 
   if (!keycloak) {
     return (
@@ -740,6 +915,74 @@ function App({ keycloak }) {
             </div>
           </div>
 
+          <div className="recenti-box">
+            <div className="titolo-sezione recenti-header">
+              <h2>Ultimi documenti consultati</h2>
+              <div className="recenti-header-actions">
+                <span className="badge-risultati">{recentDocsForUser.length} elementi</span>
+                {recentDocsForUser.length > 0 && (
+                  <button
+                    className="btn btn-light btn-small btn-soft-slate"
+                    onClick={svuotaRecentiUtente}
+                  >
+                    Svuota
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {recentDocsForUser.length === 0 ? (
+              <div className="recenti-empty">
+                Nessun documento recente per questo utente.
+              </div>
+            ) : (
+              <div className="recenti-grid">
+                {recentDocsForUser.map((doc) => (
+                  <div key={doc.id_documento} className="recent-card">
+                    <div className="recent-card-top">
+                      <div className="recent-card-title" title={doc.oggetto}>
+                        {doc.oggetto}
+                      </div>
+                      {doc.nome_stato && (
+                        <span className="recent-card-badge">{doc.nome_stato}</span>
+                      )}
+                    </div>
+
+                    <div className="recent-card-meta">
+                      {doc.protocollo && <div><strong>Protocollo:</strong> {doc.protocollo}</div>}
+                      {doc.data_pubblicazione && (
+                        <div>
+                          <strong>Data:</strong>{' '}
+                          {new Date(doc.data_pubblicazione).toLocaleDateString('it-IT')}
+                        </div>
+                      )}
+                      {doc.percorso_completo && (
+                        <div className="recent-card-folder" title={doc.percorso_completo}>
+                          <strong>Cartella:</strong> {doc.percorso_completo}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="recent-card-actions">
+                      <button
+                        className="btn btn-light btn-small btn-soft-slate"
+                        onClick={() => apriDettaglio(doc.id_documento)}
+                      >
+                        Dettaglio
+                      </button>
+                      <button
+                        className="btn btn-primary btn-small btn-gradient-blue"
+                        onClick={() => scaricaDocumento(doc.id_documento)}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="box-risultati">
             <div className="titolo-sezione">
               <h2>Risultati</h2>
@@ -753,6 +996,43 @@ function App({ keycloak }) {
                 </span>
 
                 <div className="pagination-controls">
+                  <div className="column-visibility-wrap" ref={columnMenuRef}>
+                    <button
+                      className="btn btn-light btn-small btn-soft-slate"
+                      onClick={() => setShowColumnMenu((prev) => !prev)}
+                      title="Mostra o nascondi colonne"
+                    >
+                      👁 Colonne
+                    </button>
+
+                    {showColumnMenu && (
+                      <div className="column-visibility-menu">
+                        <div className="column-visibility-title">Colonne visibili</div>
+
+                        {COLUMN_DEFS.map((column) => (
+                          <label key={column.key} className="column-visibility-item">
+                            <input
+                              type="checkbox"
+                              checked={!!columnVisibility[column.key]}
+                              onChange={() => toggleColumnVisibility(column.key)}
+                              disabled={column.key === 'azioni'}
+                            />
+                            <span>{column.label}</span>
+                          </label>
+                        ))}
+
+                        <div className="column-visibility-footer">
+                          <button
+                            className="btn btn-light btn-small btn-soft-slate"
+                            onClick={resetColumnVisibility}
+                          >
+                            Ripristina visibilità
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     className="btn btn-light btn-small btn-soft-slate"
                     onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
@@ -791,97 +1071,123 @@ function App({ keycloak }) {
                 <table className="resizable-table">
                   <thead>
                     <tr>
-                      {renderResizableHeader('Data', 'data_pubblicazione')}
-                      {renderResizableHeader('Protocollo', 'protocollo')}
-                      {renderResizableHeader('Oggetto', 'oggetto')}
-                      {renderResizableHeader('Cartella', 'percorso_completo')}
-                      {renderResizableHeader('Stato', 'nome_stato')}
-                      <th
-                        className="sticky-actions-col"
-                        style={{ width: `${columnWidths.azioni}px` }}
-                      >
-                        <div className="th-resizable">
-                          <span className="th-static-label">Azioni</span>
-                          <div className="col-resizer" onMouseDown={(e) => startResize(e, 'azioni')} />
-                        </div>
-                      </th>
+                      {renderHeaderIfVisible('Data', 'data_pubblicazione')}
+                      {renderHeaderIfVisible('Protocollo', 'protocollo')}
+                      {renderHeaderIfVisible('Oggetto', 'oggetto')}
+                      {renderHeaderIfVisible('Cartella', 'percorso_completo')}
+                      {renderHeaderIfVisible('Stato', 'nome_stato')}
+                      {columnVisibility.azioni && (
+                        <th
+                          className="sticky-actions-col"
+                          style={{ width: `${columnWidths.azioni}px` }}
+                        >
+                          <div className="th-resizable">
+                            <span className="th-static-label">Azioni</span>
+                            <div className="col-resizer" onMouseDown={(e) => startResize(e, 'azioni')} />
+                          </div>
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
                     {paginatedResults.length === 0 ? (
                       <tr>
-                        <td colSpan="6" className="nessun-risultato">
+                        <td
+                          colSpan={Object.values(columnVisibility).filter(Boolean).length}
+                          className="nessun-risultato"
+                        >
                           Nessun documento trovato
                         </td>
                       </tr>
                     ) : (
                       paginatedResults.map((doc) => (
                         <tr key={doc.id_documento}>
-                          <td style={{ width: `${columnWidths.data_pubblicazione}px` }}>
-                            {new Date(doc.data_pubblicazione).toLocaleDateString('it-IT')}
-                          </td>
-                          <td style={{ width: `${columnWidths.protocollo}px` }}>{doc.protocollo}</td>
-                          <td
-                            className="wrap-cell"
-                            style={{ width: `${columnWidths.oggetto}px` }}
-                            title={doc.oggetto}
-                          >
-                            {doc.oggetto}
-                          </td>
-                          <td
-                            className="wrap-cell"
-                            style={{ width: `${columnWidths.percorso_completo}px` }}
-                            title={doc.percorso_completo || doc.nome_cartella}
-                          >
-                            {doc.percorso_completo || doc.nome_cartella}
-                          </td>
-                          <td style={{ width: `${columnWidths.nome_stato}px` }}>{doc.nome_stato}</td>
-                          <td
-                            className="sticky-actions-col"
-                            style={{ width: `${columnWidths.azioni}px` }}
-                          >
-                            <div className="azioni-tabella compatta">
-                              <button
-                                className="action-icon-btn action-info"
-                                onClick={() => apriDettaglio(doc.id_documento)}
-                                title="Dettaglio"
-                                aria-label="Dettaglio"
-                              >
-                                ℹ
-                              </button>
+                          {columnVisibility.data_pubblicazione && (
+                            <td style={{ width: `${columnWidths.data_pubblicazione}px` }}>
+                              {new Date(doc.data_pubblicazione).toLocaleDateString('it-IT')}
+                            </td>
+                          )}
 
-                              <button
-                                className="action-icon-btn action-download"
-                                onClick={() => scaricaDocumento(doc.id_documento)}
-                                title="Download"
-                                aria-label="Download"
-                              >
-                                ↓
-                              </button>
+                          {columnVisibility.protocollo && (
+                            <td style={{ width: `${columnWidths.protocollo}px` }}>
+                              {doc.protocollo}
+                            </td>
+                          )}
 
-                              {isAdmin && (
-                                <>
-                                  <button
-                                    className="action-icon-btn action-edit"
-                                    onClick={() => avviaModificaDocumento(doc.id_documento)}
-                                    title="Modifica"
-                                    aria-label="Modifica"
-                                  >
-                                    ✎
-                                  </button>
+                          {columnVisibility.oggetto && (
+                            <td
+                              className="wrap-cell"
+                              style={{ width: `${columnWidths.oggetto}px` }}
+                              title={doc.oggetto}
+                            >
+                              {doc.oggetto}
+                            </td>
+                          )}
 
-                                  <button
-                                    className="action-icon-btn action-delete"
-                                    onClick={() => chiediEliminazioneDocumento(doc.id_documento, doc.oggetto)}
-                                    title="Elimina"
-                                    aria-label="Elimina"
-                                  >
-                                    ×
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
+                          {columnVisibility.percorso_completo && (
+                            <td
+                              className="wrap-cell"
+                              style={{ width: `${columnWidths.percorso_completo}px` }}
+                              title={doc.percorso_completo || doc.nome_cartella}
+                            >
+                              {doc.percorso_completo || doc.nome_cartella}
+                            </td>
+                          )}
+
+                          {columnVisibility.nome_stato && (
+                            <td style={{ width: `${columnWidths.nome_stato}px` }}>
+                              {doc.nome_stato}
+                            </td>
+                          )}
+
+                          {columnVisibility.azioni && (
+                            <td
+                              className="sticky-actions-col"
+                              style={{ width: `${columnWidths.azioni}px` }}
+                            >
+                              <div className="azioni-tabella compatta">
+                                <button
+                                  className="action-icon-btn action-info"
+                                  onClick={() => apriDettaglio(doc.id_documento)}
+                                  title="Dettaglio"
+                                  aria-label="Dettaglio"
+                                >
+                                  ℹ
+                                </button>
+
+                                <button
+                                  className="action-icon-btn action-download"
+                                  onClick={() => scaricaDocumento(doc.id_documento)}
+                                  title="Download"
+                                  aria-label="Download"
+                                >
+                                  ↓
+                                </button>
+
+                                {isAdmin && (
+                                  <>
+                                    <button
+                                      className="action-icon-btn action-edit"
+                                      onClick={() => avviaModificaDocumento(doc.id_documento)}
+                                      title="Modifica"
+                                      aria-label="Modifica"
+                                    >
+                                      ✎
+                                    </button>
+
+                                    <button
+                                      className="action-icon-btn action-delete"
+                                      onClick={() => chiediEliminazioneDocumento(doc.id_documento, doc.oggetto)}
+                                      title="Elimina"
+                                      aria-label="Elimina"
+                                    >
+                                      ×
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       ))
                     )}
