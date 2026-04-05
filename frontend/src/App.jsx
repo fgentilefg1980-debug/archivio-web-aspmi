@@ -8,7 +8,6 @@ import GestioneStrutture from './pages/GestioneStrutture';
 const API_BASE_URL = import.meta.env.VITE_API_URL;
 const PAGE_SIZE = 10;
 const COLUMN_STORAGE_KEY = 'aspmi_archivio_column_widths';
-const RECENT_DOCS_STORAGE_KEY = 'aspmi_archivio_recent_docs';
 const COLUMN_VISIBILITY_STORAGE_KEY = 'aspmi_archivio_column_visibility';
 
 const DEFAULT_COLUMN_WIDTHS = {
@@ -100,16 +99,7 @@ function App({ keycloak }) {
   });
 
   const [showColumnMenu, setShowColumnMenu] = useState(false);
-
-  const [recentDocs, setRecentDocs] = useState(() => {
-    try {
-      const saved = localStorage.getItem(RECENT_DOCS_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : {};
-    } catch (error) {
-      console.warn('Impossibile leggere i documenti recenti:', error);
-      return {};
-    }
-  });
+  const [recentDocs, setRecentDocs] = useState([]);
 
   const resizeRef = useRef(null);
   const columnMenuRef = useRef(null);
@@ -131,12 +121,7 @@ function App({ keycloak }) {
     return userRoles.some((role) => adminRoles.includes(String(role).toLowerCase()));
   }, [userRoles]);
 
-  const currentUsername =
-    keycloak?.tokenParsed?.preferred_username ||
-    keycloak?.tokenParsed?.email ||
-    'utente';
-
-  const recentDocsForUser = recentDocs[currentUsername] || [];
+  const recentDocsForUser = recentDocs;
 
   useEffect(() => {
     document.title = 'ASPMI Archivio';
@@ -160,14 +145,6 @@ function App({ keycloak }) {
       console.warn('Impossibile salvare la visibilità colonne:', error);
     }
   }, [columnVisibility]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(RECENT_DOCS_STORAGE_KEY, JSON.stringify(recentDocs));
-    } catch (error) {
-      console.warn('Impossibile salvare i documenti recenti:', error);
-    }
-  }, [recentDocs]);
 
   useEffect(() => {
     if (!isAdmin && vistaAttiva !== 'ricerca') {
@@ -270,41 +247,6 @@ function App({ keycloak }) {
     });
   };
 
-  const salvaDocumentoRecente = (doc) => {
-    if (!doc?.id_documento) return;
-
-    setRecentDocs((prev) => {
-      const listaUtente = prev[currentUsername] || [];
-
-      const nuovaVoce = {
-        id_documento: doc.id_documento,
-        oggetto: doc.oggetto || 'Documento senza oggetto',
-        protocollo: doc.protocollo || '',
-        data_pubblicazione: doc.data_pubblicazione || null,
-        nome_stato: doc.nome_stato || '',
-        percorso_completo: doc.percorso_completo || doc.nome_cartella || '',
-        ts: Date.now()
-      };
-
-      const aggiornata = [
-        nuovaVoce,
-        ...listaUtente.filter((item) => item.id_documento !== doc.id_documento)
-      ].slice(0, 8);
-
-      return {
-        ...prev,
-        [currentUsername]: aggiornata
-      };
-    });
-  };
-
-  const svuotaRecentiUtente = () => {
-    setRecentDocs((prev) => ({
-      ...prev,
-      [currentUsername]: []
-    }));
-  };
-
   const getAuthConfig = async (extraConfig = {}) => {
     const headers = {
       ...(extraConfig.headers || {})
@@ -349,9 +291,55 @@ function App({ keycloak }) {
     return parts.join(' > ');
   };
 
+  const caricaDocumentiRecenti = async () => {
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/documenti/recenti`,
+        await getAuthConfig()
+      );
+
+      setRecentDocs(response.data.dati || []);
+    } catch (error) {
+      console.error('Errore caricamento recenti:', error);
+    }
+  };
+
+  const salvaDocumentoRecente = async (idDocumento) => {
+    try {
+      await axios.post(
+        `${API_BASE_URL}/documenti/recenti/${idDocumento}`,
+        {},
+        await getAuthConfig()
+      );
+
+      await caricaDocumentiRecenti();
+    } catch (error) {
+      console.error('Errore salvataggio recente:', error);
+    }
+  };
+
+  const svuotaRecentiUtente = async () => {
+    try {
+      await axios.delete(
+        `${API_BASE_URL}/documenti/recenti`,
+        await getAuthConfig()
+      );
+      setRecentDocs([]);
+    } catch (error) {
+      console.error('Errore cancellazione recenti:', error);
+      setErrore('Errore durante lo svuotamento dei documenti recenti');
+    }
+  };
+
   useEffect(() => {
     if (keycloak?.authenticated) {
       caricaFiltri();
+    }
+  }, [keycloak?.authenticated]);
+
+  useEffect(() => {
+    if (keycloak?.authenticated) {
+      caricaDocumentiRecenti();
     }
   }, [keycloak?.authenticated]);
 
@@ -496,8 +484,8 @@ function App({ keycloak }) {
       const doc = response.data.dato || null;
       setDocumentoDettaglio(doc);
 
-      if (doc) {
-        salvaDocumentoRecente(doc);
+      if (doc?.id_documento) {
+        await salvaDocumentoRecente(doc.id_documento);
       }
     } catch (error) {
       console.error(error);
@@ -513,14 +501,7 @@ function App({ keycloak }) {
         await getAuthConfig()
       );
 
-      const docDaSalvare =
-        risultati.find((item) => item.id_documento === idDocumento) ||
-        documentoDettaglio ||
-        null;
-
-      if (docDaSalvare) {
-        salvaDocumentoRecente(docDaSalvare);
-      }
+      await salvaDocumentoRecente(idDocumento);
 
       const url = response.data.download_url;
       if (url) {
@@ -566,6 +547,7 @@ function App({ keycloak }) {
 
       setConfermaEliminazione(null);
       await cercaDocumenti();
+      await caricaDocumentiRecenti();
       setMessaggio('Documento eliminato con successo.');
     } catch (error) {
       console.error(error);
