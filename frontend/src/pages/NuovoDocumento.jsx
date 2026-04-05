@@ -233,50 +233,6 @@ export default function NuovoDocumento({
     }));
   };
 
-  const testDbTcp = async () => {
-    try {
-      setErrore('');
-      setMessaggio('');
-
-      const response = await axios.get(
-        `${API_BASE_URL}/debug-tcp`,
-        await getAuthConfig()
-      );
-
-      setMessaggio(`Test TCP DB: ${JSON.stringify(response.data)}`);
-      console.log('DEBUG TCP DB:', response.data);
-    } catch (error) {
-      console.error('DEBUG TCP DB ERROR:', error);
-      setErrore(
-        error.response?.data
-          ? `Test TCP DB KO: ${JSON.stringify(error.response.data)}`
-          : `Test TCP DB KO: ${error.message}`
-      );
-    }
-  };
-
-  const testDbQuery = async () => {
-    try {
-      setErrore('');
-      setMessaggio('');
-
-      const response = await axios.get(
-        `${API_BASE_URL}/test-db`,
-        await getAuthConfig()
-      );
-
-      setMessaggio(`Test Query DB: ${JSON.stringify(response.data)}`);
-      console.log('DEBUG QUERY DB:', response.data);
-    } catch (error) {
-      console.error('DEBUG QUERY DB ERROR:', error);
-      setErrore(
-        error.response?.data
-          ? `Test Query DB KO: ${JSON.stringify(error.response.data)}`
-          : `Test Query DB KO: ${error.message}`
-      );
-    }
-  };
-
   const uploadFileSePresente = async () => {
     if (!file) {
       return null;
@@ -293,7 +249,6 @@ export default function NuovoDocumento({
     );
 
     const uploadData = presignedResponse.data;
-
     const form = new FormData();
 
     Object.entries(uploadData.fields).forEach(([key, value]) => {
@@ -537,22 +492,6 @@ export default function NuovoDocumento({
             onClick={onAnnulla}
           >
             Annulla
-          </button>
-
-          <button
-            type="button"
-            className="btn btn-secondary btn-soft-slate"
-            onClick={testDbTcp}
-          >
-            Test TCP DB
-          </button>
-
-          <button
-            type="button"
-            className="btn btn-secondary btn-soft-slate"
-            onClick={testDbQuery}
-          >
-            Test Query DB
           </button>
         </div>
       </form>
