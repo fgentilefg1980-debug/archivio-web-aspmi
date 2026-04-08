@@ -5,6 +5,7 @@ import logo from './assets/logo.png';
 import NuovoDocumento from './pages/NuovoDocumento';
 import GestioneStrutture from './pages/GestioneStrutture';
 import NotificheEmail from './pages/NotificheEmail';
+import AlberoArchivio from './pages/AlberoArchivio';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL;
 const PAGE_SIZE = 10;
@@ -107,16 +108,16 @@ function App({ keycloak }) {
 
   const archivioClientId = import.meta.env.VITE_KEYCLOAK_CLIENT;
 
-const userRoles = useMemo(() => {
-  const clientRoles =
-    keycloak?.tokenParsed?.resource_access?.[archivioClientId]?.roles || [];
+  const userRoles = useMemo(() => {
+    const clientRoles =
+      keycloak?.tokenParsed?.resource_access?.[archivioClientId]?.roles || [];
 
-  return clientRoles.map((role) => String(role).toLowerCase());
-}, [keycloak?.tokenParsed, archivioClientId]);
+    return clientRoles.map((role) => String(role).toLowerCase());
+  }, [keycloak?.tokenParsed, archivioClientId]);
 
-const isAdmin = useMemo(() => {
-  return userRoles.includes('archivio_admin');
-}, [userRoles]);
+  const isAdmin = useMemo(() => {
+    return userRoles.includes('archivio_admin');
+  }, [userRoles]);
 
   const recentDocsForUser = recentDocs;
 
@@ -144,7 +145,9 @@ const isAdmin = useMemo(() => {
   }, [columnVisibility]);
 
   useEffect(() => {
-    if (!isAdmin && vistaAttiva !== 'ricerca') {
+    const visteConsentiteUtente = ['ricerca', 'albero'];
+
+    if (!isAdmin && !visteConsentiteUtente.includes(vistaAttiva)) {
       setVistaAttiva('ricerca');
       setDocumentoInModifica(null);
     }
@@ -543,7 +546,11 @@ const isAdmin = useMemo(() => {
       }
 
       setConfermaEliminazione(null);
-      await cercaDocumenti();
+
+      if (vistaAttiva === 'ricerca') {
+        await cercaDocumenti();
+      }
+
       await caricaDocumentiRecenti();
       setMessaggio('Documento eliminato con successo.');
     } catch (error) {
@@ -766,9 +773,23 @@ const isAdmin = useMemo(() => {
           onClick={() => {
             setVistaAttiva('ricerca');
             setDocumentoInModifica(null);
+            setMessaggio('');
+            setErrore('');
           }}
         >
           Ricerca documenti
+        </button>
+
+        <button
+          className={vistaAttiva === 'albero' ? 'nav-tab-btn nav-tab-cyan active' : 'nav-tab-btn nav-tab-cyan'}
+          onClick={() => {
+            setVistaAttiva('albero');
+            setDocumentoInModifica(null);
+            setMessaggio('');
+            setErrore('');
+          }}
+        >
+          Albero archivio
         </button>
 
         {isAdmin && (
@@ -798,7 +819,7 @@ const isAdmin = useMemo(() => {
             </button>
 
             <button
-              className={vistaAttiva === 'notifiche-email' ? 'nav-tab-btn nav-tab-green active' : 'nav-tab-btn nav-tab-green'}
+              className={vistaAttiva === 'notifiche-email' ? 'nav-tab-btn nav-tab-amber active' : 'nav-tab-btn nav-tab-amber'}
               onClick={() => {
                 setVistaAttiva('notifiche-email');
                 setDocumentoInModifica(null);
@@ -1250,6 +1271,19 @@ const isAdmin = useMemo(() => {
             </div>
           )}
         </>
+      )}
+
+      {vistaAttiva === 'albero' && (
+        <AlberoArchivio
+          keycloak={keycloak}
+          cartelle={cartelle}
+          isAdmin={isAdmin}
+          onOpenDetail={apriDettaglio}
+          onDownload={scaricaDocumento}
+          onEdit={avviaModificaDocumento}
+          onDelete={chiediEliminazioneDocumento}
+          documentoDettaglio={documentoDettaglio}
+        />
       )}
 
       {isAdmin && vistaAttiva === 'nuovo' && (
