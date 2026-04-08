@@ -1274,17 +1274,17 @@ function App({ keycloak }) {
       )}
 
       {vistaAttiva === 'albero' && (
-        <AlberoArchivio
-          keycloak={keycloak}
-          cartelle={cartelle}
-          isAdmin={isAdmin}
-          onOpenDetail={apriDettaglio}
-          onDownload={scaricaDocumento}
-          onEdit={avviaModificaDocumento}
-          onDelete={chiediEliminazioneDocumento}
-          documentoDettaglio={documentoDettaglio}
-        />
-      )}
+  <AlberoArchivio
+    keycloak={keycloak}
+    cartelle={cartelle}
+    risultatiGlobali={risultati}
+    isAdmin={isAdmin}
+    onOpenDetail={apriDettaglio}
+    onDownload={scaricaDocumento}
+    onEdit={avviaModificaDocumento}
+    onDelete={chiediEliminazioneDocumento}
+  />
+)}
 
       {isAdmin && vistaAttiva === 'nuovo' && (
         <NuovoDocumento
