@@ -198,6 +198,14 @@ h4 {
   background: linear-gradient(135deg, #0f9d58, #35c97a);
 }
 
+.nav-tab-cyan {
+  background: linear-gradient(135deg, #0891b2, #38bdf8);
+}
+
+.nav-tab-amber {
+  background: linear-gradient(135deg, #f59e0b, #fbbf24);
+}
+
 /* FILTRI */
 .box-filtri {
   display: grid;
@@ -772,13 +780,6 @@ table th:nth-child(6) {
   padding: 0 10px;
   font-size: 12px;
   border-radius: 8px;
-}
-
-.byline {
-  margin: 6px 0 0 0;
-  font-size: 12px;
-  color: #6b7280;
-  font-style: italic;
 }
 
 .byline {
@@ -1489,6 +1490,7 @@ table th:nth-child(6) {
   font-size: 13px;
   line-height: 1.5;
 }
+
 .document-form-grid.admin-form-grid {
   gap: 18px;
 }
@@ -1558,14 +1560,6 @@ table th:nth-child(6) {
   .admin-panel-body {
     padding: 18px;
   }
-}
-
-.nav-tab-cyan {
-  background: linear-gradient(135deg, #0891b2, #38bdf8);
-}
-
-.nav-tab-amber {
-  background: linear-gradient(135deg, #f59e0b, #fbbf24);
 }
 
 /* =========================
@@ -2202,11 +2196,123 @@ table th:nth-child(6) {
   color: #cbd5e1;
 }
 
+/* ICONE GERARCHIA CARTELLE / DOCUMENTI */
 .tree-folder-icon-premium {
-  width: 20px;
+  position: relative;
+  width: 22px;
+  height: 18px;
   flex-shrink: 0;
-  font-size: 16px;
-  line-height: 1.4;
+  display: inline-block;
+  margin-top: 1px;
+}
+
+/* Cartella: corpo */
+.tree-folder-icon-premium.folder-closed::before,
+.tree-folder-icon-premium.folder-open::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 0;
+  bottom: 1px;
+  height: 13px;
+  border-radius: 3px 3px 4px 4px;
+  border: 1px solid currentColor;
+  background: currentColor;
+  opacity: 0.18;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* Cartella: linguetta */
+.tree-folder-icon-premium.folder-closed::after,
+.tree-folder-icon-premium.folder-open::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 1px;
+  width: 9px;
+  height: 5px;
+  border-radius: 3px 3px 0 0;
+  border: 1px solid currentColor;
+  border-bottom: none;
+  background: currentColor;
+  opacity: 0.28;
+}
+
+/* Cartella aperta leggermente inclinata */
+.tree-folder-icon-premium.folder-open {
+  transform: translateY(-1px);
+}
+
+.tree-folder-icon-premium.folder-open::before {
+  opacity: 0.24;
+}
+
+/* Documento */
+.tree-folder-icon-premium.folder-file {
+  width: 16px;
+  height: 20px;
+  margin-left: 3px;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.82));
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+}
+
+.tree-folder-icon-premium.folder-file::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 7px;
+  height: 7px;
+  background: #fff;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+  border-top: 1px solid currentColor;
+  border-right: 1px solid currentColor;
+}
+
+.tree-folder-icon-premium.folder-file::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 7px;
+  width: 8px;
+  height: 1px;
+  background: currentColor;
+  box-shadow:
+    0 3px 0 currentColor,
+    0 6px 0 currentColor;
+  opacity: 0.45;
+}
+
+/* Colori per livello */
+.tree-folder-icon-premium.level-0.folder-closed,
+.tree-folder-icon-premium.level-0.folder-open {
+  color: #2563eb;
+}
+
+.tree-folder-icon-premium.level-1.folder-closed,
+.tree-folder-icon-premium.level-1.folder-open {
+  color: #7c3aed;
+}
+
+.tree-folder-icon-premium.level-2.folder-closed,
+.tree-folder-icon-premium.level-2.folder-open {
+  color: #0f9d58;
+}
+
+.tree-folder-icon-premium.level-3.folder-closed,
+.tree-folder-icon-premium.level-3.folder-open {
+  color: #f59e0b;
+}
+
+.tree-folder-icon-premium.level-4.folder-closed,
+.tree-folder-icon-premium.level-4.folder-open {
+  color: #ec4899;
+}
+
+.tree-folder-icon-premium.folder-file {
+  color: #64748b;
 }
 
 .tree-node-main-premium {

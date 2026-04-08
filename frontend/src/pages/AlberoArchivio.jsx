@@ -153,6 +153,7 @@ function TreeNode({
   const isExpanded = expandedIds.has(String(node.id_cartella));
   const isSelected = String(selectedId) === String(node.id_cartella);
   const count = docCounts[String(node.id_cartella)] || 0;
+  const safeLevel = Math.min(level, 4);
 
   return (
     <div className="tree-node-premium">
@@ -173,9 +174,16 @@ function TreeNode({
           {hasChildren ? (isExpanded ? '▾' : '▸') : '•'}
         </span>
 
-        <span className="tree-folder-icon-premium">
-          {hasChildren ? (isExpanded ? '📂' : '📁') : '🗂'}
-        </span>
+        <span
+          className={`tree-folder-icon-premium ${
+            hasChildren
+              ? isExpanded
+                ? 'folder-open'
+                : 'folder-closed'
+              : 'folder-file'
+          } level-${safeLevel}`}
+          aria-hidden="true"
+        />
 
         <span className="tree-node-main-premium">
           <span className="tree-node-title-premium">{node.nome_cartella}</span>
