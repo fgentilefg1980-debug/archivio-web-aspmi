@@ -105,22 +105,18 @@ function App({ keycloak }) {
   const resizeRef = useRef(null);
   const columnMenuRef = useRef(null);
 
-  const adminRoles = ['admin', 'archivio_admin', 'aspmi_admin'];
+  const archivioClientId = import.meta.env.VITE_KEYCLOAK_CLIENT;
 
-  const userRoles = useMemo(() => {
-    const realmRoles = keycloak?.tokenParsed?.realm_access?.roles || [];
-    const clientRolesObject = keycloak?.tokenParsed?.resource_access || {};
+const userRoles = useMemo(() => {
+  const clientRoles =
+    keycloak?.tokenParsed?.resource_access?.[archivioClientId]?.roles || [];
 
-    const clientRoles = Object.values(clientRolesObject).flatMap(
-      (item) => item?.roles || []
-    );
+  return clientRoles.map((role) => String(role).toLowerCase());
+}, [keycloak?.tokenParsed, archivioClientId]);
 
-    return [...new Set([...realmRoles, ...clientRoles])];
-  }, [keycloak?.tokenParsed]);
-
-  const isAdmin = useMemo(() => {
-    return userRoles.some((role) => adminRoles.includes(String(role).toLowerCase()));
-  }, [userRoles]);
+const isAdmin = useMemo(() => {
+  return userRoles.includes('archivio_admin');
+}, [userRoles]);
 
   const recentDocsForUser = recentDocs;
 
